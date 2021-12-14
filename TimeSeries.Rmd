@@ -1,0 +1,167 @@
+---
+title: "510 Final Report"
+output: pdf_document
+author: Saman Kashanchi
+always_allow_html: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(modeltime)
+library(tidymodels)
+library(tidyverse)
+library(timetk)
+library(lubridate)
+library(tseries)
+
+pacman::p_load(lubridate)
+```
+
+## Methods Of Time Series Forcating
+
+#####     Many prediction problems involve a time component and thus require extrapolation of time series data, or time series forecasting. Time series forecasting is one of the most applied data science techniques in business, finance, supply chain management, production and inventory planning. Time series forecasting is a technique for the prediction of events through a sequence of time. It predicts future events by analyzing the trends of the past, on the assumption that future trends will hold similar to historical trends. 
+
+
+```{r cars, echo=FALSE, include=FALSE}
+data <- read_csv("~/Desktop/RITHM/Research/USDJPY.csv")
+data$DATE <- seq.Date(from = as.Date("1974-01-01"), length.out = nrow(data), by = 31)
+N <- 181
+data = data[-(1:N), , drop = FALSE]
+```
+
+### A Look at the data
+
+#####     The time series that I have taken into considerton is the exchange rate between the United States and Japan also known as USDJPY. Exchange rate forecasting is one of the most important topics in international economics. I have choosen this perticular time series as there is an abundance of data for the subject and also theres is many usfull insights that can be drawn from exhange rate priceses, trends and fluctuations. 
+
+```{r intro, echo=FALSE}
+data %>% plot_time_series(DATE, EXJPUS)
+```
+
+```{r summaary, echo=FALSE, include=FALSE}
+summary(data)
+```
+
+
+### Stationarity Tests
+#####  Now that we have a good idea of what the data looks like it is important to dive a bit deeper to understand the underlying characteristics of the data before modeling. One characteristics that is particularly important for time series modeling is stationarity. Luckly there are a few ways to test for stationarity for example we have the Augmented Dickey–Fuller (ADF) t-statistic test and the Kwiatkowski-Phillips-Schmidt-Shin (KPSS) for level or trend stationarity. 
+
+```{r test, echo=FALSE, include=FALSE}
+adf.test(data$EXJPUS)
+kpss.test(data$EXJPUS, null="Trend")
+```
+
+
+##### Note that the data was non-stationary in our tests, but all is not lost there are ways one can make time sereis stationary. One way to make a non-stationary time series stationary is to compute the differences between consecutive observations. This is known as differencing. Transformations such as logarithms can help to stabilise the variance of a time series. Differencing can help stabilise the mean of a time series by removing changes in the level of a time series, and therefore eliminating (or reducing) trend and seasonality. We use this technique to stabelize our data for the upcoming models and then continue onto the modeling portion of the project. 
+
+### Train Test Split
+
+##### Now that we are in the modeling portion of the project it is firstly imporant to segmentize the data so that we have our traing and testing portions to work with. This is visualized below to show the reader the proportionality of our split.(It is impartant to note that I have omitted data going back further then 1985 due to relevence)
+
+```{r split, echo=FALSE}
+splits <- time_series_split(
+  data,
+  assess     = "50 months",
+  cumulative = TRUE
+)
+
+splits %>%
+  tk_time_series_cv_plan() %>%
+  plot_time_series_cv_plan(DATE, EXJPUS)
+```
+
+
+### Forecasting Techniques 
+#### ARIMA
+##### In our first model we are going to explore Arima. ARIMA, short for ‘Auto Regressive Integrated Moving Average’ is actually a class of models that ‘explains’ a given time series based on its own past values, that is, its own lags and the lagged forecast errors, so that equation can be used to forecast future values. Stationarity is very important for this model and therefor the tests and transformations that we did earlier are necessary for its prepossessing.
+
+
+
+```{r Arima, echo=FALSE, include=FALSE}
+model_arima <- arima_reg() %>%
+  set_engine("auto_arima") %>%
+  fit(EXJPUS ~ DATE, training(splits))
+model_arima
+```
+
+#### PROPHET
+##### This model is called Prophet. Prophet is a procedure for forecasting time series data based on an additive model where non-linear trends are fit with yearly, weekly, and daily seasonality, plus holiday effects. It works best with time series that have strong seasonal effects and several seasons of historical data. Prophet is robust to missing data and shifts in the trend, and typically handles outliers well.
+
+```{r Prophet, echo=FALSE, include=FALSE}
+model_prophet <- prophet_reg(
+  seasonality_yearly = TRUE) %>%
+  set_engine("prophet") %>%
+  fit(EXJPUS ~ DATE, training(splits))
+model_prophet
+```
+
+
+#### GLMnet
+##### As machine learning is seeping into every industry a lot of approaches have been taken for time series forecasting. Here we explore a linear approach called Glmnet. Glmnet is a model that fits generalized linear and similar models via penalized maximum likelihood. The regularization path is computed for the lasso or elastic net penalty at a grid of values (on the log scale) for the regularization parameter lambda. The algorithm is extremely fast, and can exploit sparsity in the input matrix x. It fits linear, logistic and multinomial, poison, and Cox regression models. It can also fit multi-response linear regression, generalized linear models for custom families, and relaxed lasso regression models.
+
+```{r glmnet, echo=FALSE, include=FALSE}
+model_glmnet <- linear_reg(penalty = 0.01) %>%
+  set_engine("glmnet") %>%
+  fit(
+    EXJPUS ~ wday(DATE, label = TRUE)
+    + month(DATE, label = TRUE)
+    + as.numeric(DATE),
+    training(splits)
+  )
+model_glmnet
+```
+
+
+### Resutls
+##### In order to better access the results and for the ease of comparison all three models are added to a table and then compared using matrices such as: MAE, RMSE, MAPE. Root Mean Squared Error (RMSE) and Mean Absolute Error (MAE) are metrics used to evaluate a Regression Model. These metrics tell us how accurate our predictions are and, what is the amount of deviation from the actual values.
+```{r tbl, echo=FALSE, include=FALSE}
+model_tbl <- modeltime_table(
+  model_arima,
+  model_prophet,
+  model_glmnet
+)
+```
+##### The model with best test scores was the prophet model. This technique was able to achieve a rsme score of 6.63 while the ARIMA models was around 6.96 and the GLMnet around 20.2. Therefore, the prophet model was able to outperform its competitors in predicting the closest to the actual values of the series. It was also the best in the other matrices as well. Through visualization one can get a better idea of the accuracy of the models. We can then use the models to predict one-time step ahead onto 8th month of 2020. Using the prediction one can access the geopolitical relationship of the two countries and then buy a currency that they believe will appreciate compared to the other.
+
+```{r tblAccur, echo=FALSE,include=FALSE}
+calib_tbl <- model_tbl %>%
+  modeltime_calibrate(testing(splits))
+calib_tbl %>% modeltime_accuracy()
+```
+
+```{r forcast , echo=FALSE}
+calib_tbl %>%
+  modeltime_forecast(
+    new_data   = testing(splits),
+    actual_data = data
+  ) %>%
+  plot_modeltime_forecast()
+```
+
+
+```{r forcasTbl, echo=FALSE, include=FALSE}
+future_forecast_tbl <- calib_tbl %>%
+  modeltime_refit(data) %>%
+  modeltime_forecast(
+    h = "1 months",
+    actual_data = data)
+tail(future_forecast_tbl)
+```
+
+
+
+
+### Conclusion 
+##### From the forecasting graph one can see that even though prophet is the closest to the actual values of the data it is unable to get the direction of the movement right. Whereas models like ARIMA and glmnet have classified the direction and the general trend correctly but are lacking in terms of actual values. After researching this topic for past two years I have learnt that forecasting such un-stationary series to get actual values is a time-consuming pointless task as these values are determined by a random walk and can’t be forecasted accurately. Rather though it is more beneficial to use these techniques to help see the trend and general momentum or movement of the asset. Based on this I believe that the ARIMA model was able to capture the movement of the asset the best even though it has a slightly less RMSE score it is able to pick up on the trend shifts and inflection points better. 
+
+
+
+## References
+#### Xu, J., Hugelier, S., Zhu, H. and Gowen, A., 2021. Deep learning for classification of time series spectral images using combined multi-temporal and spectral features.
+
+#### Medium. 2021. What are RMSE and MAE?. [online] Available at: <https://towardsdatascience.com/what-are-rmse-and-mae-e405ce230383> [Accessed 13 December 2021].
+
+#### Machine Learning Plus. 2021. ARIMA Model - Complete Guide to Time Series Forecasting in Python | ML+. [online] Available at: <https://www.machinelearningplus.com/time-series/arima-model-time-series-forecasting-python/> [Accessed 13 December 2021].
+
+
+#### Glmnet.stanford.edu. 2021. An Introduction to `glmnet`. [online] Available at: <https://glmnet.stanford.edu/articles/glmnet.html> [Accessed 13 December 2021].
+
